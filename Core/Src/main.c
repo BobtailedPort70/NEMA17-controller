@@ -33,11 +33,20 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+#define STEP_WRITE(x) HAL_GPIO_WritePin(STEP_GPIO_Port, STEP_Pin, (x)?GPIO_PIN_SET:GPIO_PIN_RESET)
+#define DIR_FWD()     HAL_GPIO_WritePin(DIR_GPIO_Port,  DIR_Pin,  GPIO_PIN_SET)
+#define DIR_REV()     HAL_GPIO_WritePin(DIR_GPIO_Port,  DIR_Pin,  GPIO_PIN_RESET)
+#define EN_ON()       HAL_GPIO_WritePin(EN_GPIO_Port,   EN_Pin,   GPIO_PIN_RESET)
+#define EN_OFF()      HAL_GPIO_WritePin(EN_GPIO_Port,   EN_Pin,   GPIO_PIN_SET)
 
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
 /* USER CODE BEGIN PM */
+#define DIR_FORWARD()  HAL_GPIO_WritePin(DIR_GPIO_Port, DIR_Pin, GPIO_PIN_SET)
+#define DIR_BACKWARD() HAL_GPIO_WritePin(DIR_GPIO_Port, DIR_Pin, GPIO_PIN_RESET)
+#define MOTOR_ENABLE() HAL_GPIO_WritePin(EN_GPIO_Port, EN_Pin, GPIO_PIN_RESET)
+#define MOTOR_DISABLE() HAL_GPIO_WritePin(EN_GPIO_Port, EN_Pin, GPIO_PIN_SET)
 
 /* USER CODE END PM */
 
@@ -55,6 +64,9 @@ void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_CAN_Init(void);
 static void MX_I2C1_Init(void);
+void Motor_Init(void);
+void Motor_SetSpeed(uint32_t freq);
+void Motor_SetDirection(uint8_t dir);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
