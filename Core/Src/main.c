@@ -18,7 +18,7 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
-#include "stm32f1xx_hal_gpio.h"
+#include "stm32f1xx_hal.h"
 #include "usb_device.h"
 
 /* Private includes ----------------------------------------------------------*/
@@ -33,20 +33,16 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define STEP_WRITE(x) HAL_GPIO_WritePin(STEP_GPIO_Port, STEP_Pin, (x)?GPIO_PIN_SET:GPIO_PIN_RESET)
-#define DIR_FWD()     HAL_GPIO_WritePin(DIR_GPIO_Port,  DIR_Pin,  GPIO_PIN_SET)
-#define DIR_REV()     HAL_GPIO_WritePin(DIR_GPIO_Port,  DIR_Pin,  GPIO_PIN_RESET)
-#define EN_ON()       HAL_GPIO_WritePin(EN_GPIO_Port,   EN_Pin,   GPIO_PIN_RESET)
-#define EN_OFF()      HAL_GPIO_WritePin(EN_GPIO_Port,   EN_Pin,   GPIO_PIN_SET)
 
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
 /* USER CODE BEGIN PM */
-#define DIR_FORWARD()  HAL_GPIO_WritePin(DIR_GPIO_Port, DIR_Pin, GPIO_PIN_SET)
-#define DIR_BACKWARD() HAL_GPIO_WritePin(DIR_GPIO_Port, DIR_Pin, GPIO_PIN_RESET)
-#define MOTOR_ENABLE() HAL_GPIO_WritePin(EN_GPIO_Port, EN_Pin, GPIO_PIN_RESET)
-#define MOTOR_DISABLE() HAL_GPIO_WritePin(EN_GPIO_Port, EN_Pin, GPIO_PIN_SET)
+#define STEP_WRITE(x) HAL_GPIO_WritePin(STEP_GPIO_Port, STEP_Pin, (x)?GPIO_PIN_SET:GPIO_PIN_RESET)
+#define DIR_FWD()     HAL_GPIO_WritePin(DIR_GPIO_Port,  DIR_Pin,  GPIO_PIN_SET)
+#define DIR_REV()     HAL_GPIO_WritePin(DIR_GPIO_Port,  DIR_Pin,  GPIO_PIN_RESET)
+//#define EN_ON()       HAL_GPIO_WritePin(EN_GPIO_Port,   EN_Pin,   GPIO_PIN_RESET)
+//#define EN_OFF()      HAL_GPIO_WritePin(EN_GPIO_Port,   EN_Pin,   GPIO_PIN_SET)
 
 /* USER CODE END PM */
 
@@ -55,7 +51,10 @@ CAN_HandleTypeDef hcan;
 
 I2C_HandleTypeDef hi2c1;
 
+TIM_HandleTypeDef htim2;
+
 /* USER CODE BEGIN PV */
+uint8_t RX_Buffer [1] ; // DATA to receive
 
 /* USER CODE END PV */
 
@@ -64,15 +63,42 @@ void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_CAN_Init(void);
 static void MX_I2C1_Init(void);
-void Motor_Init(void);
-void Motor_SetSpeed(uint32_t freq);
-void Motor_SetDirection(uint8_t dir);
+static void MX_TIM2_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+static inline void delay_us(uint32_t us)
+{
+    uint16_t start = __HAL_TIM_GET_COUNTER(&htim2);
+    while ((uint16_t)(__HAL_TIM_GET_COUNTER(&htim2) - start) < us) {
+        //__NOP();
+    }
+}
+
+static inline void STEP_PULSE_US(uint16_t high_us, uint16_t low_us)
+{
+    STEP_WRITE(1);
+    delay_us(high_us);
+    STEP_WRITE(0);
+    delay_us(low_us);
+}
+
+void Stepper_MoveSteps(uint32_t steps, int dir, uint16_t step_high_us, uint16_t step_low_us)
+{
+    if (dir >= 0) { DIR_FWD(); } else { DIR_REV(); }
+
+    //EN_ON();                 // TMC2209 enable is active-low
+    delay_us(10);            // tiny settle
+
+    for (uint32_t i = 0; i < steps; i++) {
+        STEP_PULSE_US(step_high_us, step_low_us);
+    }
+
+    //EN_OFF();                // optional: disable when done
+}
 
 /* USER CODE END 0 */
 
@@ -108,7 +134,16 @@ int main(void)
   MX_CAN_Init();
   MX_I2C1_Init();
   MX_USB_DEVICE_Init();
+  MX_TIM2_Init();
   /* USER CODE BEGIN 2 */
+  HAL_TIM_Base_Start(&htim2);  // start 1 MHz timer
+  HAL_I2C_Slave_Receive_IT(&hi2c1 ,(uint8_t *)RX_Buffer, 1); //Receiving in Interrupt mode
+  HAL_Delay(100);
+
+  // One-time initial states (run once after init)
+  DIR_FWD();         // set default direction
+  STEP_WRITE(0);     // make sure STEP starts low
+  HAL_GPIO_WritePin(LED2_GPIO_Port, LED2_Pin, GPIO_PIN_SET); // Turn on LED2 to indicate ready
 
   /* USER CODE END 2 */
 
@@ -117,13 +152,19 @@ int main(void)
   while (1)
   {
     HAL_GPIO_TogglePin(LED1_GPIO_Port, LED1_Pin); // Toggle LED1
-    HAL_Delay(500); // Delay 500 ms
+    HAL_Delay(100);
     HAL_GPIO_TogglePin(LED2_GPIO_Port, LED2_Pin); // Toggle LED2
-    HAL_Delay(500); // Delay 500 ms
+    HAL_Delay(100);
+
+    
 
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+    Stepper_MoveSteps(1600, +1, 3, 997);  // ~1 kHz steps, 3 µs high
+    HAL_Delay(500);
+    Stepper_MoveSteps(1600, -1, 3, 997);
+    HAL_Delay(500);
   }
   /* USER CODE END 3 */
 }
@@ -242,6 +283,51 @@ static void MX_I2C1_Init(void)
   /* USER CODE BEGIN I2C1_Init 2 */
 
   /* USER CODE END I2C1_Init 2 */
+
+}
+
+/**
+  * @brief TIM2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM2_Init(void)
+{
+
+  /* USER CODE BEGIN TIM2_Init 0 */
+
+  /* USER CODE END TIM2_Init 0 */
+
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  /* USER CODE BEGIN TIM2_Init 1 */
+
+  /* USER CODE END TIM2_Init 1 */
+  htim2.Instance = TIM2;
+  htim2.Init.Prescaler = 15;
+  htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim2.Init.Period = 65535;
+  htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim2, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim2, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM2_Init 2 */
+
+  /* USER CODE END TIM2_Init 2 */
 
 }
 
